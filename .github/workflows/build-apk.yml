@@ -95,7 +95,7 @@ jobs:
           # 应用名显示为中文
           for p in glob.glob('android/app/src/*/AndroidManifest.xml'):
               t = open(p, encoding='utf-8').read()
-              t2 = re.sub(r'android:label="[^"]*"', 'android:label="好题精练精简版"', t)
+              t2 = re.sub(r'android:label="[^"]*"', 'android:label="好题精练"', t)
               if t2 != t:
                   open(p, 'w', encoding='utf-8').write(t2)
                   print('[+] 已设置应用名:', p)

@@ -1,4 +1,4 @@
-// 好题精练精简版 - 数据模型
+// 好题精练 - 数据模型
 // 字段名直接对应步步高 socialexercise.eebbk.net 后端返回的真实 JSON。
 
 class Grade {

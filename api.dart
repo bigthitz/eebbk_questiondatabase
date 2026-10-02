@@ -1,4 +1,4 @@
-// 好题精练精简版 - 网络层
+// 好题精练 - 网络层
 // 对应步步高 socialexercise.eebbk.net 的真实接口（已抓包还原）。
 // 鉴权极弱：仅需 accountId + 设备伪装参数，无 sign / token。
 
