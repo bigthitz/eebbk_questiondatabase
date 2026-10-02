@@ -536,10 +536,10 @@ class QuestionPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final opts = (q.options ?? []).take(4).toList();
+    final opts = q.optionList.take(4).toList();
     final answer = q.answerLetters;
-    final analysis =
-        q.questionAnalysis ?? q.questionAnalyse ?? q.questionComment ?? '无';
+    final analysis = flattenMath(
+        q.questionAnalysis ?? q.questionAnalyse ?? q.questionComment ?? '无');
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -559,7 +559,7 @@ class QuestionPage extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Html(
-            data: q.questionTitle ?? '',
+            data: flattenMath(q.stemHtml),
             style: {
               'body': Style(
                 fontSize: FontSize(20),
@@ -587,7 +587,7 @@ class QuestionPage extends StatelessWidget {
     );
   }
 
-  Widget _optionTile(BuildContext context, String letter, String? text,
+  Widget _optionTile(BuildContext context, String letter, String? html,
       bool isSel, bool submitted, bool answerHas) {
     final cs = Theme.of(context).colorScheme;
     final Color bg;
@@ -649,11 +649,19 @@ class QuestionPage extends StatelessWidget {
                 ),
                 const SizedBox(width: 14),
                 Expanded(
-                  child: text == null
+                  child: (html == null || html.isEmpty)
                       ? const SizedBox.shrink()
-                      : Text(text,
-                          style: TextStyle(
-                              fontSize: 18, height: 1.4, color: fg)),
+                      : Html(
+                          data: flattenMath(html),
+                          style: {
+                            'body': Style(
+                              fontSize: FontSize(18),
+                              lineHeight: LineHeight.number(1.4),
+                              margin: Margins.zero,
+                              color: fg,
+                            ),
+                          },
+                        ),
                 ),
                 if (submitted && (answerHas || isSel))
                   Icon(

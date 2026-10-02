@@ -185,4 +185,110 @@ class Question {
     final list = set.toList()..sort();
     return list.join();
   }
+
+  static final RegExp _radioRe = RegExp(
+    r'<input\b[^>]*\bclass\s*=\s*"input_radio"[^>]*>(.*?)</input>',
+    caseSensitive: false,
+    dotAll: true,
+  );
+
+  static final RegExp _radioAnyRe = RegExp(
+    r'<input\b[^>]*type\s*=\s*"radio"[^>]*>(.*?)</input>',
+    caseSensitive: false,
+    dotAll: true,
+  );
+
+  bool get hasEmbeddedOptions {
+    final t = questionTitle ?? '';
+    return _radioRe.hasMatch(t) || _radioAnyRe.hasMatch(t);
+  }
+
+  /// 选项列表：优先用独立 options 字段；否则从题干内嵌的
+  /// `<input type="radio" class="input_radio">A.…</input>` 中解析，
+  /// 并去掉开头的 “A.” 这类标号（字母由 UI 单独给出）。
+  List<String> get optionList {
+    if (options != null && options!.isNotEmpty) return options!;
+    final t = questionTitle ?? '';
+    var ms = _radioRe.allMatches(t).toList();
+    if (ms.isEmpty) ms = _radioAnyRe.allMatches(t).toList();
+    return ms.map((m) {
+      var v = m.group(1)!.trim();
+      v = v.replaceFirst(RegExp(r'^[A-Da-d]\s*[.、．,，:：)）]\s*'), '');
+      return v.trim();
+    }).toList();
+  }
+
+  /// 去掉内嵌选项后的题干 HTML（保留图片与公式）。
+  String get stemHtml {
+    final t = questionTitle ?? '';
+    if (!hasEmbeddedOptions) return t;
+    return t.replaceAll(_radioRe, '').replaceAll(_radioAnyRe, '').trim();
+  }
+}
+
+/// 把 MathML 展平为可读文本。flutter_html 不支持 MathML，直接渲染公式会丢失
+/// （表现为空白），这里按 mfrac/msup/msub 等结构转成 num/den、base^exp、
+/// base_sub 之类的线性写法，保证内容可见。
+String flattenMath(String html) {
+  final re =
+      RegExp(r'<math\b[^>]*>(.*?)</math>', caseSensitive: false, dotAll: true);
+  return html.replaceAllMapped(re, (m) => _renderMathMl(m.group(1)!));
+}
+
+class _MmlNode {
+  final String tag;
+  final List<Object> children = [];
+  _MmlNode(this.tag);
+}
+
+String _renderMathMl(String inner) {
+  final root = _MmlNode('math');
+  final stack = <_MmlNode>[root];
+  final tokenRe = RegExp(r'</?[a-zA-Z][^>]*>|[^<]+');
+  for (final m in tokenRe.allMatches(inner)) {
+    final t = m.group(0)!;
+    if (t.startsWith('</')) {
+      if (stack.length > 1) stack.removeLast();
+    } else if (t.startsWith('<')) {
+      final name = RegExp(r'^<\s*([a-zA-Z][\w:.-]*)')
+              .firstMatch(t)
+              ?.group(1)
+              ?.toLowerCase() ??
+          '';
+      final node = _MmlNode(name);
+      stack.last.children.add(node);
+      if (!t.endsWith('/>')) stack.add(node);
+    } else {
+      stack.last.children.add(t);
+    }
+  }
+  var out = _serializeMml(root).replaceAll(RegExp(r'\s+'), ' ').trim();
+  // 只转义尖括号，保留 &#x2212; 之类的实体交给渲染层解码。
+  out = out.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return out;
+}
+
+String _serializeMml(Object n) {
+  if (n is String) return n;
+  final node = n as _MmlNode;
+  final kids = node.children;
+  String k(int i) => i < kids.length ? _serializeMml(kids[i]) : '';
+  switch (node.tag) {
+    case 'mfrac':
+      return '(${k(0)})/(${k(1)})';
+    case 'msup':
+      return '${k(0)}^${k(1)}';
+    case 'msub':
+      return '${k(0)}_${k(1)}';
+    case 'msubsup':
+      return '${k(0)}_${k(1)}^${k(2)}';
+    case 'msqrt':
+      return '√(${kids.map(_serializeMml).join()})';
+    case 'mroot':
+      return '${k(0)}√(${k(1)})';
+    case 'mover':
+      return '${k(0)}${k(1)}';
+    default:
+      return kids.map(_serializeMml).join();
+  }
 }
