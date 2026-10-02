@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
+import 'package:flutter_html_math/flutter_html_math.dart';
 import 'api.dart';
 import 'models.dart';
 
@@ -538,8 +539,8 @@ class QuestionPage extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     final opts = q.optionList.take(4).toList();
     final answer = q.answerLetters;
-    final analysis = flattenMath(
-        q.questionAnalysis ?? q.questionAnalyse ?? q.questionComment ?? '无');
+    final analysis =
+        q.questionAnalysis ?? q.questionAnalyse ?? q.questionComment ?? '无';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -559,7 +560,8 @@ class QuestionPage extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Html(
-            data: flattenMath(q.stemHtml),
+            data: q.stemHtml,
+            extensions: [MathHtmlExtension()],
             style: {
               'body': Style(
                 fontSize: FontSize(20),
@@ -663,7 +665,8 @@ class QuestionPage extends StatelessWidget {
                   child: (html == null || html.isEmpty)
                       ? const SizedBox.shrink()
                       : Html(
-                          data: flattenMath(html),
+                          data: html,
+                          extensions: [MathHtmlExtension()],
                           style: {
                             'body': Style(
                               fontSize: FontSize(18),
@@ -727,6 +730,7 @@ class QuestionPage extends StatelessWidget {
           const SizedBox(height: 6),
           Html(
             data: analysis,
+            extensions: [MathHtmlExtension()],
             style: {
               'body': Style(
                 fontSize: FontSize(17),
