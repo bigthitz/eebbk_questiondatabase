@@ -1,0 +1,138 @@
+name: 构建 Android APK
+
+# 触发方式：
+#   1) push 到 main        -> 构建 APK 并作为 Actions 产物（Artifact）上传
+#   2) push tag（如 v0.1.0）-> 构建 APK 并自动创建 Release，APK 作为 Release 附件
+#   3) 手动 workflow_dispatch
+#
+# 说明：当前仓库只有根目录的 main.dart / api.dart / models.dart / pubspec.yaml，
+#       缺少标准 Flutter 工程结构（android/ 等），因此流水线会先用 `flutter create`
+#       在临时目录生成 android 脚手架并拷贝回来（不动本仓库的 pubspec.yaml），
+#       再把根目录源码移入 lib/，最后打包。
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_SUPPRESS_ANALYTICS: "true"
+
+jobs:
+  build-apk:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 Flutter（stable）
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: 补全 Flutter 工程结构
+        run: |
+          set -e
+          if [ ! -d android ]; then
+            rm -rf /tmp/skel
+            flutter create \
+              --platforms=android \
+              --org com.eebbk \
+              -a kotlin \
+              --project-name haoti_lite \
+              /tmp/skel
+            cp -r /tmp/skel/android ./android
+          fi
+          mkdir -p lib
+          for f in main.dart api.dart models.dart; do
+            if [ -f "$f" ]; then mv -f "$f" lib/; fi
+          done
+          ls -R lib
+
+      - name: 补充网络权限与网络明文配置
+        run: |
+          python3 - <<'PY'
+          import re, glob, os
+
+          manifest = 'android/app/src/main/AndroidManifest.xml'
+          s = open(manifest, encoding='utf-8').read()
+
+          if 'android.permission.INTERNET' not in s:
+              i = s.index('<manifest') 
+              i = s.index('>', i) + 1
+              s = s[:i] + '\n    <uses-permission android:name="android.permission.INTERNET"/>' + s[i:]
+              print('[+] 已注入 INTERNET 权限')
+
+          if 'usesCleartextTraffic' not in s:
+              s = re.sub(r'<application\b', '<application\n        android:usesCleartextTraffic="true"', s, count=1)
+              print('[+] 已开启 usesCleartextTraffic（接口全为 https，仅为兼容图片/CDN 的 http 资源）')
+
+          open(manifest, 'w', encoding='utf-8').write(s)
+
+          # 应用名显示为中文
+          for p in glob.glob('android/app/src/*/AndroidManifest.xml'):
+              t = open(p, encoding='utf-8').read()
+              t2 = re.sub(r'android:label="[^"]*"', 'android:label="好题精练精简版"', t)
+              if t2 != t:
+                  open(p, 'w', encoding='utf-8').write(t2)
+                  print('[+] 已设置应用名:', p)
+          PY
+          cat android/app/src/main/AndroidManifest.xml
+
+      - name: 安装依赖
+        run: flutter pub get
+
+      - name: 静态分析（不阻塞构建）
+        run: flutter analyze --no-pub
+        continue-on-error: true
+
+      - name: 构建 Release APK
+        run: flutter build apk --release
+
+      - name: 整理产物
+        run: |
+          set -e
+          mkdir -p dist
+          SRC=build/app/outputs/flutter-apk/app-release.apk
+          ls -lh "$SRC"
+          SAFE_REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          cp "$SRC" "dist/haoti_lite-${SAFE_REF}.apk"
+          ls -lh dist
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: haoti-lite-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: 创建 Release 并附加 APK（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
