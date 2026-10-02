@@ -3,7 +3,6 @@
 // 鉴权极弱：仅需 accountId + 设备伪装参数，无 sign / token。
 
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'models.dart';
 
@@ -25,6 +24,7 @@ class EebbkApi {
     'machineType': '1',
   };
 
+  // 注意：不要在这里写 Accept-Encoding，交给 http 包自动处理
   static Map<String, String> _headers() => {
         'accountId': accountId,
         ..._device,
@@ -32,27 +32,43 @@ class EebbkApi {
         'Accept-Http': 'https',
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'okhttp/3.12.0',
-        'Accept-Encoding': 'gzip',
       };
 
   static String _now() {
     final d = DateTime.now();
     String p(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}:${p(d.second)}';
+    return '${d.year}-${p(d.month)}-${p(d.day)} '
+        '${p(d.hour)}:${p(d.minute)}:${p(d.second)}';
   }
 
   // 统一 POST：header 与 body 都带 accountId + 设备参数（与原版一致）
   static Future<Map<String, dynamic>> _post(
       String ep, Map<String, String> body) async {
     final uri = Uri.parse('$base$path/$ep');
-    final resp = await http.post(uri,
-        headers: _headers(),
-        body: {..._device, ...body, 'accountId': accountId});
-    final bytes = resp.bodyBytes;
-    final decoded = resp.headers['content-encoding']?.contains('gzip') == true
-        ? GZipCodec().decode(bytes)
-        : bytes;
-    return json.decode(utf8.decode(decoded));
+    final resp = await http.post(
+      uri,
+      headers: _headers(),
+      body: {..._device, ...body, 'accountId': accountId},
+    );
+
+    // http 包已自动处理 gzip，这里直接用 bodyBytes 解码即可
+    final text = utf8.decode(resp.bodyBytes, allowMalformed: true);
+
+    // 调试用：需要时取消注释
+    // print('[$ep] status=${resp.statusCode} body=$text');
+
+    if (resp.statusCode != 200) {
+      throw Exception('HTTP ${resp.statusCode}: $text');
+    }
+
+    final jsonMap = json.decode(text) as Map<String, dynamic>;
+
+    final code = jsonMap['errorCode']?.toString();
+    if (code != null && code != '101002' && code != '0') {
+      throw Exception('接口错误 [$code]: ${jsonMap['errorInfo']}');
+    }
+
+    return jsonMap;
   }
 
   // ① 年级列表
