@@ -186,44 +186,62 @@ class Question {
     return list.join();
   }
 
-  static final RegExp _radioRe = RegExp(
-    r'<input\b[^>]*\bclass\s*=\s*"input_radio"[^>]*>(.*?)</input>',
-    caseSensitive: false,
-    dotAll: true,
-  );
-
-  static final RegExp _radioAnyRe = RegExp(
-    r'<input\b[^>]*type\s*=\s*"radio"[^>]*>(.*?)</input>',
-    caseSensitive: false,
-    dotAll: true,
-  );
-
-  bool get hasEmbeddedOptions {
-    final t = questionTitle ?? '';
-    return _radioRe.hasMatch(t) || _radioAnyRe.hasMatch(t);
-  }
-
-  /// 选项列表：优先用独立 options 字段；否则从题干内嵌的
-  /// `<input type="radio" class="input_radio">A.…</input>` 中解析，
+  /// 选项列表：优先用独立 options 字段；否则从题干内嵌的 input 标签中解析，
   /// 并去掉开头的 “A.” 这类标号（字母由 UI 单独给出）。
-  List<String> get optionList {
-    if (options != null && options!.isNotEmpty) return options!;
-    final t = questionTitle ?? '';
-    var ms = _radioRe.allMatches(t).toList();
-    if (ms.isEmpty) ms = _radioAnyRe.allMatches(t).toList();
-    return ms.map((m) {
-      var v = m.group(1)!.trim();
-      v = v.replaceFirst(RegExp(r'^[A-Da-d]\s*[.、．,，:：)）]\s*'), '');
-      return v.trim();
-    }).toList();
-  }
+  List<String> get optionList => _parseContent(this).options;
 
   /// 去掉内嵌选项后的题干 HTML（保留图片与公式）。
-  String get stemHtml {
-    final t = questionTitle ?? '';
-    if (!hasEmbeddedOptions) return t;
-    return t.replaceAll(_radioRe, '').replaceAll(_radioAnyRe, '').trim();
+  String get stemHtml => _parseContent(this).stem;
+
+  /// 把题干拆成 (题干, 选项)。
+  ///
+  /// 服务端的选项写法有两种：
+  ///   1) `<input ...>A.…</input>`（带闭合标签）
+  ///   2) `<input .../>A.…`（自闭合，无闭合标签，选项内容紧跟其后）
+  /// 因此以“开标签 <input …>”作为切分点：每段从某个 input 标签结束到下一个
+  /// input 标签（或末尾），即为一个选项；这段里的 </input>、<p>/</p> 一并去掉。
+  /// 这样无论属性顺序、引号、是否自闭合都能正确解析，不会再把选项留在题干里。
+  static _Content _parseContent(Question q) {
+    final title = q.questionTitle ?? '';
+    final openRe = RegExp(r'<input\b[^>]*>', caseSensitive: false);
+    final opens = openRe.allMatches(title).toList();
+
+    String stem = title;
+    final parsed = <String>[];
+    if (opens.isNotEmpty) {
+      stem = title.substring(0, opens.first.start);
+      for (var i = 0; i < opens.length; i++) {
+        final start = opens[i].end;
+        final end = i + 1 < opens.length ? opens[i + 1].start : title.length;
+        parsed.add(_cleanOption(title.substring(start, end)));
+      }
+      // 末尾可能残留一个空的 <p>（选项所在段落的开标签），去掉
+      stem = stem
+          .replaceFirst(RegExp(r'(\s*<p\b[^>]*>\s*)+$', caseSensitive: false),
+              '')
+          .trim();
+    }
+
+    final opts =
+        (q.options != null && q.options!.isNotEmpty) ? q.options! : parsed;
+    return _Content(stem, opts);
   }
+
+  static String _cleanOption(String s) {
+    var v = s
+        .replaceAll(RegExp(r'</?input\b[^>]*>', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), ' ')
+        .trim();
+    // 去掉开头的选项标号：A. / B、/ C．/ D)
+    v = v.replaceFirst(RegExp(r'^[A-Da-d]\s*[.、．,，:：)）]\s*'), '');
+    return v.trim();
+  }
+}
+
+class _Content {
+  final String stem;
+  final List<String> options;
+  const _Content(this.stem, this.options);
 }
 
 /// 把 MathML 展平为可读文本。flutter_html 不支持 MathML，直接渲染公式会丢失

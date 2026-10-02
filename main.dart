@@ -626,11 +626,22 @@ class QuestionPage extends StatelessWidget {
       avatarFg = isSel ? cs.onPrimary : cs.onSurfaceVariant;
     }
 
+    final borderColor = submitted
+        ? (answerHas
+            ? Colors.green.shade400
+            : (isSel ? cs.error : cs.outlineVariant))
+        : (isSel ? cs.primary : cs.outlineVariant);
+    final borderWidth = (isSel || (submitted && answerHas)) ? 2.0 : 1.0;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: bg,
-        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: borderColor, width: borderWidth),
+        ),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: submitted ? null : () => onToggle(letter),
