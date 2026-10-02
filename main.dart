@@ -1,5 +1,5 @@
 // 好题精练 - 原生渲染 UI
-// 一题一屏（PageView）/ 选项仅 ABCD / 网络请求不锁屏 / MD3 不规则图形加载动画
+// 一题一屏（PageView）/ 选项仅 ABCD / 整批统一提交判分 / 网络请求不锁屏 / MD3 不规则图形加载动画
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -374,7 +374,7 @@ class _BlobPainter extends CustomPainter {
   bool shouldRepaint(_BlobPainter old) => old.t != t || old.color != color;
 }
 
-/// 一题一屏：整屏 PageView，可左右滑动 / 按钮切换
+/// 一题一屏：整批作答、统一提交判分（不逐题对答案）
 class QuestionDeck extends StatefulWidget {
   final List<Question> questions;
   const QuestionDeck({super.key, required this.questions});
@@ -384,7 +384,11 @@ class QuestionDeck extends StatefulWidget {
 
 class _QuestionDeckState extends State<QuestionDeck> {
   final _pc = PageController();
+  final Map<int, Set<String>> _answers = {};
   int _index = 0;
+  bool _submitted = false;
+
+  int get _total => widget.questions.length;
 
   @override
   void dispose() {
@@ -392,26 +396,86 @@ class _QuestionDeckState extends State<QuestionDeck> {
     super.dispose();
   }
 
+  static String _lettersOf(Iterable<String> s) => (s.toList()..sort()).join();
+
+  bool _isCorrect(int i) {
+    final sel = _answers[i];
+    if (sel == null || sel.isEmpty) return false;
+    return _lettersOf(sel) == widget.questions[i].answerLetters;
+  }
+
+  int get _correctCount {
+    var n = 0;
+    for (var i = 0; i < _total; i++) {
+      if (_isCorrect(i)) n++;
+    }
+    return n;
+  }
+
+  void _toggle(int i, String letter) {
+    if (_submitted) return;
+    final multi = widget.questions[i].answerLetters.length > 1;
+    setState(() {
+      final set = _answers.putIfAbsent(i, () => <String>{});
+      if (multi) {
+        if (!set.remove(letter)) set.add(letter);
+      } else {
+        if (set.length == 1 && set.contains(letter)) {
+          set.clear();
+        } else {
+          set
+            ..clear()
+            ..add(letter);
+        }
+      }
+    });
+  }
+
   void _go(int delta) {
     final target = _index + delta;
-    if (target < 0 || target >= widget.questions.length) return;
+    if (target < 0 || target >= _total) return;
     _pc.animateToPage(target,
         duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
   }
 
+  void _submit() {
+    final unanswered = _total - _answers.values.where((s) => s.isNotEmpty).length;
+    setState(() => _submitted = true);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      behavior: SnackBarBehavior.floating,
+      content: Text(unanswered > 0
+          ? '已提交：答对 $_correctCount/$_total（$unanswered 题未作答）'
+          : '已提交：答对 $_correctCount/$_total'),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final total = widget.questions.length;
+    final total = _total;
     return Scaffold(
       appBar: AppBar(
         title: Text('好题精练 · ${_index + 1}/$total'),
         centerTitle: true,
+        actions: [
+          TextButton.icon(
+            onPressed: _submitted ? null : _submit,
+            icon: Icon(_submitted ? Icons.check_circle_rounded : Icons.done_all_rounded),
+            label: Text(_submitted ? '已提交' : '提交'),
+          ),
+        ],
       ),
       body: PageView.builder(
         controller: _pc,
         itemCount: total,
         onPageChanged: (i) => setState(() => _index = i),
-        itemBuilder: (_, i) => QuestionPage(q: widget.questions[i]),
+        itemBuilder: (_, i) => QuestionPage(
+          q: widget.questions[i],
+          index: i,
+          selected: _answers[i] ?? const <String>{},
+          submitted: _submitted,
+          correct: _submitted ? _isCorrect(i) : null,
+          onToggle: (l) => _toggle(i, l),
+        ),
       ),
       bottomNavigationBar: SafeArea(
         top: false,
@@ -428,8 +492,10 @@ class _QuestionDeckState extends State<QuestionDeck> {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('${_index + 1}/$total',
-                    style: Theme.of(context).textTheme.labelLarge),
+                child: Text(
+                  _submitted ? '答对 $_correctCount/$total' : '${_index + 1}/$total',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
               ),
               Expanded(
                 child: FilledButton.icon(
@@ -446,31 +512,32 @@ class _QuestionDeckState extends State<QuestionDeck> {
   }
 }
 
-class QuestionPage extends StatefulWidget {
+class QuestionPage extends StatelessWidget {
   final Question q;
-  const QuestionPage({super.key, required this.q});
-  @override
-  State<QuestionPage> createState() => _QuestionPageState();
-}
+  final int index;
+  final Set<String> selected;
+  final bool submitted;
+  final bool? correct; // 仅在已提交时有意义
+  final ValueChanged<String> onToggle;
 
-class _QuestionPageState extends State<QuestionPage>
-    with AutomaticKeepAliveClientMixin {
+  const QuestionPage({
+    super.key,
+    required this.q,
+    required this.index,
+    required this.selected,
+    required this.submitted,
+    required this.correct,
+    required this.onToggle,
+  });
+
   static const _letters = ['A', 'B', 'C', 'D'];
-  String? _ans;
-  bool _revealed = false;
-
-  @override
-  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    final q = widget.q;
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final opts = (q.options ?? []).take(4).toList();
-    final correct = _ans != null &&
-        _ans!.toUpperCase() == (q.questionAnswer ?? '').toUpperCase();
+    final answer = q.answerLetters;
     final analysis =
         q.questionAnalysis ?? q.questionAnalyse ?? q.questionComment ?? '无';
 
@@ -479,9 +546,16 @@ class _QuestionPageState extends State<QuestionPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '难度 ${q.difficulty ?? '-'}   作答 ${q.answerCount ?? 0}   答对 ${q.rightCount ?? 0}',
-            style: tt.labelMedium?.copyWith(color: cs.outline),
+          Row(
+            children: [
+              Text('第 ${index + 1} 题',
+                  style: tt.titleSmall?.copyWith(color: cs.primary)),
+              const Spacer(),
+              Text(
+                '难度 ${q.difficulty ?? '-'}   作答 ${q.answerCount ?? 0}   答对 ${q.rightCount ?? 0}',
+                style: tt.labelMedium?.copyWith(color: cs.outline),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Html(
@@ -495,93 +569,82 @@ class _QuestionPageState extends State<QuestionPage>
             },
           ),
           const SizedBox(height: 24),
-          ...List.generate(
-            opts.isEmpty ? 4 : opts.length,
-            (i) => _optionTile(
-              _letters[i],
+          ...List.generate(opts.isEmpty ? 4 : opts.length, (i) {
+            final letter = _letters[i];
+            return _optionTile(
+              context,
+              letter,
               opts.isEmpty ? null : opts[i],
-              _ans == _letters[i],
-            ),
-          ),
+              selected.contains(letter),
+              submitted,
+              answer.contains(letter),
+            );
+          }),
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed:
-                  _ans == null ? null : () => setState(() => _revealed = true),
-              child: const Text('提交 / 看答案'),
-            ),
-          ),
-          if (_revealed) ...[
-            const SizedBox(height: 20),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _ans == null
-                        ? '正确答案：${q.questionAnswer ?? '-'}'
-                        : (correct
-                            ? '✅ 答对'
-                            : '❌ 答错（正确答案：${q.questionAnswer ?? '-'}）'),
-                    style: tt.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: _ans == null
-                          ? cs.onSurface
-                          : (correct ? Colors.green.shade700 : cs.error),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('解析', style: tt.titleSmall),
-                  const SizedBox(height: 6),
-                  Html(
-                    data: analysis,
-                    style: {
-                      'body': Style(
-                        fontSize: FontSize(17),
-                        lineHeight: LineHeight.number(1.6),
-                        color: cs.onSurface,
-                      ),
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
+          if (submitted) _resultCard(context, answer, analysis),
         ],
       ),
     );
   }
 
-  Widget _optionTile(String letter, String? text, bool selected) {
+  Widget _optionTile(BuildContext context, String letter, String? text,
+      bool isSel, bool submitted, bool answerHas) {
     final cs = Theme.of(context).colorScheme;
+    final Color bg;
+    final Color fg;
+    if (submitted) {
+      if (answerHas) {
+        bg = Colors.green.shade50;
+        fg = Colors.green.shade900;
+      } else if (isSel) {
+        bg = cs.errorContainer;
+        fg = cs.onErrorContainer;
+      } else {
+        bg = cs.surfaceContainerHighest;
+        fg = cs.onSurface;
+      }
+    } else {
+      bg = isSel ? cs.primaryContainer : cs.surfaceContainerHighest;
+      fg = cs.onSurface;
+    }
+
+    final Color avatarBg;
+    final Color avatarFg;
+    if (submitted) {
+      if (answerHas) {
+        avatarBg = Colors.green.shade600;
+        avatarFg = Colors.white;
+      } else if (isSel) {
+        avatarBg = cs.error;
+        avatarFg = cs.onError;
+      } else {
+        avatarBg = cs.surface;
+        avatarFg = cs.onSurfaceVariant;
+      }
+    } else {
+      avatarBg = isSel ? cs.primary : cs.surface;
+      avatarFg = isSel ? cs.onPrimary : cs.onSurfaceVariant;
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
-        color: selected ? cs.primaryContainer : cs.surfaceContainerHighest,
+        color: bg,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => setState(() => _ans = letter),
+          onTap: submitted ? null : () => onToggle(letter),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 16,
-                  backgroundColor: selected ? cs.primary : cs.surface,
+                  backgroundColor: avatarBg,
                   child: Text(
                     letter,
                     style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: selected ? cs.onPrimary : cs.onSurfaceVariant,
-                    ),
+                        fontWeight: FontWeight.bold, color: avatarFg),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -589,12 +652,71 @@ class _QuestionPageState extends State<QuestionPage>
                   child: text == null
                       ? const SizedBox.shrink()
                       : Text(text,
-                          style: const TextStyle(fontSize: 18, height: 1.4)),
+                          style: TextStyle(
+                              fontSize: 18, height: 1.4, color: fg)),
                 ),
+                if (submitted && (answerHas || isSel))
+                  Icon(
+                    answerHas ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                    color: answerHas ? Colors.green.shade600 : cs.error,
+                  ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _resultCard(BuildContext context, String answer, String analysis) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final unanswered = selected.isEmpty;
+    final ok = correct == true;
+
+    final String status;
+    final Color statusColor;
+    if (unanswered) {
+      status = '⚪ 未作答';
+      statusColor = cs.outline;
+    } else if (ok) {
+      status = '✅ 答对';
+      statusColor = Colors.green.shade700;
+    } else {
+      status = '❌ 答错';
+      statusColor = cs.error;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(status,
+              style: tt.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold, color: statusColor)),
+          const SizedBox(height: 6),
+          Text('正确答案：${answer.isEmpty ? '-' : answer}',
+              style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Text('解析', style: tt.titleSmall),
+          const SizedBox(height: 6),
+          Html(
+            data: analysis,
+            style: {
+              'body': Style(
+                fontSize: FontSize(17),
+                lineHeight: LineHeight.number(1.6),
+                color: cs.onSurface,
+              ),
+            },
+          ),
+        ],
       ),
     );
   }

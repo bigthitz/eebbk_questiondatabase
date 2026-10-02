@@ -168,4 +168,21 @@ class Question {
     }
     return null;
   }
+
+  /// 服务端 questionAnswer 可能是 HTML，例如
+  /// `<p><question_answer_item></question_answer_item></p><p>D</p><p></p>`。
+  /// 这里先去掉标签，再归一化为排序后的字母串（如 "D" / "ABD"），
+  /// 用于判分与展示，避免把 HTML 当成答案导致答对被判错。
+  String get answerLetters {
+    final raw = questionAnswer ?? '';
+    if (raw.trim().isEmpty) return '';
+    final text = raw.replaceAll(RegExp(r'<[^>]*>'), ' ');
+    final set = <String>{};
+    for (final m in RegExp(r'[A-Da-d]').allMatches(text)) {
+      set.add(m.group(0)!.toUpperCase());
+    }
+    if (set.isEmpty) return text.trim().toUpperCase();
+    final list = set.toList()..sort();
+    return list.join();
+  }
 }
